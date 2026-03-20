@@ -279,6 +279,12 @@ async function runSubagent(
       : "Complete your task autonomously. When finished, call the subagent_done tool to close this session.";
     const summaryInstruction =
       "Your FINAL assistant message (before calling subagent_done or before the user exits) should summarize what you accomplished.";
+    const denySet = resolveDenyTools(agentDefs);
+    const agentType = params.agent ?? params.name;
+    const tabTitleInstruction = denySet.has("set_tab_title") ? "" :
+      `As your FIRST action, set the tab title using set_tab_title. ` +
+      `The title MUST start with [${agentType}] followed by a short description of your current task. ` +
+      `Example: "[${agentType}] Analyzing auth module". Keep it concise.`;
     const identity = agentDefs?.body ?? params.systemPrompt ?? null;
     const roleBlock = identity ? `\n\n${identity}` : "";
     const forkPreamble =
@@ -286,7 +292,7 @@ async function runSubagent(
       "Do NOT restart or re-execute anything already done.]\n\n";
     const fullTask = params.fork
       ? `${forkPreamble}${params.task}`
-      : `${roleBlock}\n\n${modeHint}\n\n${params.task}\n\n${summaryInstruction}`;
+      : `${roleBlock}\n\n${modeHint}\n\n${tabTitleInstruction}\n\n${params.task}\n\n${summaryInstruction}`;
 
     // Build pi command
     const parts: string[] = ["pi"];
@@ -320,8 +326,7 @@ async function runSubagent(
       }
     }
 
-    // Resolve denied tools from agent frontmatter (spawning + deny-tools)
-    const denySet = resolveDenyTools(agentDefs);
+    // Build env prefix for denied tools (denySet already resolved above for tab title check)
     const envPrefix = denySet.size > 0
       ? `PI_DENY_TOOLS=${shellEscape([...denySet].join(","))} `
       : "";
