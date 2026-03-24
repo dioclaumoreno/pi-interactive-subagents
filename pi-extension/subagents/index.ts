@@ -747,6 +747,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
             name: params.name,
             task: params.task,
             agent: params.agent,
+            sessionFile: running.sessionFile,
             status: "started",
           },
         };
