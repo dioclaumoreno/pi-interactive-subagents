@@ -278,33 +278,33 @@ function updateWidget() {
   latestCtx.ui.setWidget(
     "subagent-status",
     (_tui: any, theme: any) => {
-      const box = new Box(1, 0, (text: string) => theme.bg("toolSuccessBg", text));
+      const box = new Box(1, 0, (text: string) => theme.bg("toolPendingBg", text));
 
       const count = runningSubagents.size;
+      const label = count === 1 ? "1 subagent" : `${count} subagents`;
       const header =
-        theme.fg("dim", "─ Subagents ") +
-        theme.fg("accent", `${count} running`) +
-        theme.fg("dim", " ─");
+        theme.fg("accent", "⟳ ") +
+        theme.bold(label) +
+        theme.fg("dim", " running");
 
       const agentLines: string[] = [];
       for (const [_id, agent] of runningSubagents) {
-        const elapsed = formatElapsedMMSS(agent.startTime);
+        const elapsed = theme.fg("accent", formatElapsedMMSS(agent.startTime));
+        const name = theme.bold(agent.name);
         const agentTag = agent.agent ? theme.fg("dim", ` (${agent.agent})`) : "";
         const progress =
           agent.entries != null && agent.bytes != null
-            ? theme.fg("dim", `${agent.entries} msgs (${formatBytes(agent.bytes)})`)
-            : theme.fg("dim", "loading…");
+            ? theme.fg("dim", ` · ${agent.entries} msgs (${formatBytes(agent.bytes)})`)
+            : theme.fg("dim", " · starting…");
 
-        agentLines.push(
-          `  ⟳ ${elapsed}  ${theme.fg("toolTitle", agent.name)}${agentTag}  ${progress}`,
-        );
+        agentLines.push(`  ${elapsed}  ${name}${agentTag}${progress}`);
       }
 
       const content = new Text([header, ...agentLines].join("\n"), 0, 0);
       box.addChild(content);
       return box;
     },
-    { placement: "belowEditor" },
+    { placement: "aboveEditor" },
   );
 }
 
@@ -1075,31 +1075,39 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         const name = details.name ?? "subagent";
         const exitCode = details.exitCode ?? 0;
         const elapsed = details.elapsed != null ? formatElapsed(details.elapsed) : "?";
+        const bgFn = exitCode === 0
+          ? (text: string) => theme.bg("toolSuccessBg", text)
+          : (text: string) => theme.bg("toolErrorBg", text);
         const icon = exitCode === 0 ? theme.fg("success", "✓") : theme.fg("error", "✗");
         const status = exitCode === 0 ? "completed" : `failed (exit ${exitCode})`;
+        const agentTag = details.agent ? theme.fg("dim", ` (${details.agent})`) : "";
 
-        const header = `${icon} ${theme.fg("toolTitle", theme.bold(name))} — ${status} (${elapsed})`;
-        const content = typeof message.content === "string" ? message.content : "";
+        const header = `${icon} ${theme.fg("toolTitle", theme.bold(name))}${agentTag} ${theme.fg("dim", "—")} ${status} ${theme.fg("dim", `(${elapsed})`)}`;
+        const rawContent = typeof message.content === "string" ? message.content : "";
 
         // Clean summary (remove session ref and leading label for display)
-        const summary = content
+        const summary = rawContent
           .replace(/\n\nSession: .+\nResume: .+$/, "")
           .replace(`Sub-agent "${name}" completed (${elapsed}).\n\n`, "")
           .replace(`Sub-agent "${name}" failed (exit code ${exitCode}).\n\n`, "");
 
-        const lines = [header];
+        // Build content for the box
+        const contentLines = [header];
         if (summary) {
-          const summaryLines = summary.split("\n").slice(0, 5);
-          for (const line of summaryLines) {
-            lines.push("  " + line.slice(0, width - 4));
+          const previewLines = summary.split("\n").slice(0, 5);
+          for (const line of previewLines) {
+            contentLines.push(theme.fg("dim", line.slice(0, width - 6)));
           }
           const totalLines = summary.split("\n").length;
           if (totalLines > 5) {
-            lines.push(theme.fg("dim", `  ... (${totalLines - 5} more lines)`));
+            contentLines.push(theme.fg("muted", `… ${totalLines - 5} more lines`));
           }
         }
 
-        return lines;
+        // Render via Box for background + padding
+        const box = new Box(1, 0, bgFn);
+        box.addChild(new Text(contentLines.join("\n"), 0, 0));
+        return box.render(width);
       }
     };
   });
