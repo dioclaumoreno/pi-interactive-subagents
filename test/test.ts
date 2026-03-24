@@ -155,6 +155,25 @@ describe("session.ts", () => {
     it("returns null for empty array", () => {
       assert.equal(findLastAssistantMessage([]), null);
     });
+
+    it("skips empty assistant messages and returns real content above", () => {
+      const realMsg = {
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Real summary content." }],
+        },
+      };
+      const emptyMsg = {
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [],
+        },
+      };
+      const entries = [realMsg, emptyMsg] as any[];
+      assert.equal(findLastAssistantMessage(entries), "Real summary content.");
+    });
   });
 
   describe("appendBranchSummary", () => {

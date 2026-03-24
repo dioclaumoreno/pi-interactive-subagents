@@ -61,10 +61,10 @@ export function findLastAssistantMessage(entries: SessionEntry[]): string | null
     if (msg.message.role !== "assistant") continue;
 
     const texts = msg.message.content
-      .filter((block) => block.type === "text" && typeof block.text === "string")
+      .filter((block) => block.type === "text" && typeof block.text === "string" && block.text.trim() !== "")
       .map((block) => block.text as string);
 
-    if (texts.length > 0) return texts.join("\n");
+    if (texts.length > 0 && texts.join("").trim()) return texts.join("\n");
   }
   return null;
 }
