@@ -95,6 +95,27 @@ function requireMuxBackend(): MuxBackend {
   return backend;
 }
 
+function cmuxRpcSync(method: string, params: Record<string, unknown> = {}): any {
+  const out = execFileSync("cmux", ["rpc", method, JSON.stringify(params)], {
+    encoding: "utf8",
+  }).trim();
+  return out ? JSON.parse(out) : null;
+}
+
+async function cmuxRpcAsync(method: string, params: Record<string, unknown> = {}): Promise<any> {
+  const { stdout } = await execFileAsync("cmux", ["rpc", method, JSON.stringify(params)], {
+    encoding: "utf8",
+  });
+  const out = stdout.trim();
+  return out ? JSON.parse(out) : null;
+}
+
+function cmuxTabRefFromSurface(surface?: string): string | null {
+  if (!surface) return null;
+  if (surface.startsWith("surface:")) return `tab:${surface.slice("surface:".length)}`;
+  return null;
+}
+
 /**
  * Detect if the user's default shell is fish.
  * Fish uses $status instead of $? for exit codes.
@@ -180,18 +201,25 @@ export function createSurfaceSplit(
   const backend = requireMuxBackend();
 
   if (backend === "cmux") {
-    const surfaceArg = fromSurface ? ` --surface ${shellEscape(fromSurface)}` : "";
-    const out = execSync(`cmux new-split ${direction}${surfaceArg}`, {
-      encoding: "utf8",
-    }).trim();
-    const match = out.match(/surface:\d+/);
-    if (!match) {
-      throw new Error(`Unexpected cmux new-split output: ${out}`);
+    if (fromSurface) {
+      cmuxRpcSync("surface.focus", { surface_id: fromSurface });
     }
-    const surface = match[0];
-    execSync(`cmux rename-tab --surface ${shellEscape(surface)} ${shellEscape(name)}`, {
-      encoding: "utf8",
-    });
+
+    const result = cmuxRpcSync("surface.split", { direction });
+    const surface = result?.surface_ref ?? result?.surface_id;
+    if (!surface || typeof surface !== "string") {
+      throw new Error(`Unexpected cmux surface.split output: ${JSON.stringify(result)}`);
+    }
+
+    const tabRef = result?.tab_ref ?? cmuxTabRefFromSurface(surface);
+    if (tabRef) {
+      try {
+        cmuxRpcSync("tab.action", { tab_ref: tabRef, action: "rename", title: name });
+      } catch {
+        // Optional.
+      }
+    }
+
     return surface;
   }
 
@@ -282,11 +310,10 @@ export function renameCurrentTab(title: string): void {
   const backend = requireMuxBackend();
 
   if (backend === "cmux") {
-    const surfaceId = process.env.CMUX_SURFACE_ID;
-    if (!surfaceId) throw new Error("CMUX_SURFACE_ID not set");
-    execSync(`cmux rename-tab --surface ${shellEscape(surfaceId)} ${shellEscape(title)}`, {
-      encoding: "utf8",
-    });
+    const current = cmuxRpcSync("system.identify", {});
+    const tabRef = current?.focused?.tab_ref ?? cmuxTabRefFromSurface(current?.focused?.surface_ref);
+    if (!tabRef) throw new Error("Current cmux tab not found");
+    cmuxRpcSync("tab.action", { tab_ref: tabRef, action: "rename", title });
     return;
   }
 
@@ -310,9 +337,10 @@ export function renameWorkspace(title: string): void {
   const backend = requireMuxBackend();
 
   if (backend === "cmux") {
-    execSync(`cmux workspace-action --action rename --title ${shellEscape(title)}`, {
-      encoding: "utf8",
-    });
+    const current = cmuxRpcSync("system.identify", {});
+    const workspaceId = current?.focused?.workspace_id;
+    if (!workspaceId) throw new Error("Current cmux workspace not found");
+    cmuxRpcSync("workspace.rename", { workspace_id: workspaceId, title });
     return;
   }
 
@@ -350,9 +378,7 @@ export function sendCommand(surface: string, command: string): void {
   const backend = requireMuxBackend();
 
   if (backend === "cmux") {
-    execSync(`cmux send --surface ${shellEscape(surface)} ${shellEscape(command + "\n")}`, {
-      encoding: "utf8",
-    });
+    cmuxRpcSync("surface.send_text", { surface_id: surface, text: command + "\n" });
     return;
   }
 
@@ -373,9 +399,8 @@ export function readScreen(surface: string, lines = 50): string {
   const backend = requireMuxBackend();
 
   if (backend === "cmux") {
-    return execSync(`cmux read-screen --surface ${shellEscape(surface)} --lines ${lines}`, {
-      encoding: "utf8",
-    });
+    const result = cmuxRpcSync("surface.read_text", { surface_id: surface });
+    return tailLines(result?.text ?? "", lines);
   }
 
   if (backend === "tmux") {
@@ -407,12 +432,8 @@ export async function readScreenAsync(surface: string, lines = 50): Promise<stri
   const backend = requireMuxBackend();
 
   if (backend === "cmux") {
-    const { stdout } = await execFileAsync(
-      "cmux",
-      ["read-screen", "--surface", surface, "--lines", String(lines)],
-      { encoding: "utf8" },
-    );
-    return stdout;
+    const result = await cmuxRpcAsync("surface.read_text", { surface_id: surface });
+    return tailLines(result?.text ?? "", lines);
   }
 
   if (backend === "tmux") {
